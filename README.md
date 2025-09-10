@@ -1,5 +1,7 @@
 # nftp - Nextcloud SFTP-like CLI
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+
 `nftp` is a simple interactive CLI tool for Nextcloud, providing FTP/SFTP-like commands for file management.
 
 ---
