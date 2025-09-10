@@ -1,0 +1,2 @@
+# nftp
+Nextcloud FTP CLI
