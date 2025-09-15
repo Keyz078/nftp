@@ -10,7 +10,6 @@ jobs:
   build:
     name: Build and Release for ${{ matrix.arch }}
     runs-on: ubuntu-latest
-    environment: GH_PAT
 
     strategy:
       matrix:
@@ -51,4 +50,4 @@ jobs:
         with:
           files: dist/nftp-${{ matrix.arch }}.tar.gz
         env:
-          GITHUB_TOKEN: ${{ secrets.GH_PAT }}
+          GH_PAT: ${{ secrets.GH_PAT }}
