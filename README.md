@@ -20,8 +20,9 @@
 
 ---
 
-## Installation python method
+## Installation
 
+### python method
 1. Clone the repository:
 
 ```bash
@@ -31,7 +32,7 @@ pip3 install -r requirements.txt
 python3 nftp.py
 ```
 
-## Binary method
+### Binary method
 
 1. Download binary
 ```bash
@@ -39,7 +40,7 @@ python3 nftp.py
 wget https://github.com/Keyz078/nftp/releases/download/v0.1.0/nftp-amd64.tar.gz
 
 # for arm64
-https://github.com/Keyz078/nftp/releases/download/v0.1.0/nftp-arm64.tar.gz
+wget https://github.com/Keyz078/nftp/releases/download/v0.1.0/nftp-arm64.tar.gz
 ```
 2. Extract and make the script executable:
 
