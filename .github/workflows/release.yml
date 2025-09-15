@@ -42,12 +42,12 @@ jobs:
               pyinstaller --onefile nftp.py &&
               mv dist/nftp dist/nftp-${{ matrix.arch }} &&
               cp README.md dist/ &&
-              cd dist && zip nftp-${{ matrix.arch }}.zip nftp-${{ matrix.arch }} README.md
+              cd dist && tar -czf nftp-${{ matrix.arch }}.tar.gz nftp-${{ matrix.arch }} README.md
             "
 
       - name: Upload release asset (.zip) for ${{ matrix.arch }}
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/nftp-${{ matrix.arch }}.zip
+          files: dist/nftp-${{ matrix.arch }}.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
