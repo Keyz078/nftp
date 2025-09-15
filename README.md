@@ -52,7 +52,7 @@ sudo mv nft-{arch} /usr/local/bin/nftp
 3. Run:
 
 ```bash
-./nftp
+nftp
 ```
 
 ---
