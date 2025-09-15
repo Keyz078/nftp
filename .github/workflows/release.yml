@@ -1,51 +1,53 @@
-name: Build and Release
+name: Build and Release Binary
 
 on:
   push:
     tags:
-      - "v*.*.*"
+      - 'v*'
+  workflow_dispatch:
+
 jobs:
   build:
-    runs-on: ubuntu-20.04
+    name: Build and Release for ${{ matrix.arch }}
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        arch: [amd64, arm64]
+
     steps:
-      - name: Checkout repo
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
         with:
-          python-version: "3.8" 
+          platforms: all
 
-      - name: Install dependencies
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build binary for ${{ matrix.arch }}
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pyinstaller
+          docker run --rm \
+            --platform linux/${{ matrix.arch }} \
+            -v ${{ github.workspace }}:/app \
+            -w /app \
+            ubuntu:20.04 bash -c "
+              apt update &&
+              DEBIAN_FRONTEND=noninteractive apt install -y python3 python3-pip python3-venv curl build-essential zip &&
+              python3 -m pip install --upgrade pip &&
+              pip3 install pyinstaller &&
+              pip3 install -r requirements.txt &&
+              pyinstaller --onefile nftp.py &&
+              mv dist/nftp dist/nftp-${{ matrix.arch }} &&
+              cp README.md dist/ &&
+              cd dist && zip nftp-${{ matrix.arch }}.zip nftp-${{ matrix.arch }} README.md
+            "
 
-      - name: Build binary with PyInstaller
-        run: |
-          pyinstaller --onefile --name nftp nftp.py
-          ls -lh dist/
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: nftp-binary
-          path: dist/nftp
-
-  release:
-    runs-on: ubuntu-20.04
-    needs: build
-    steps:
-      - name: Download artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: nftp-binary
-          path: .
-
-      - name: Publish Release
+      - name: Upload release asset (.zip) for ${{ matrix.arch }}
         uses: softprops/action-gh-release@v2
         with:
-          files: nftp
+          files: dist/nftp-${{ matrix.arch }}.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
