@@ -1,8 +1,8 @@
-# nftp - Nextcloud SFTP-like CLI
+# nftp - Nextcloud SFTP-like WEBDAV CLI
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
-`nftp` is a simple interactive CLI tool for Nextcloud, providing FTP/SFTP-like commands for file management.
+`nftp` is a simple interactive WEBDAV CLI tool for Nextcloud, providing SFTP-like commands for file management.
 
 ---
 
@@ -11,7 +11,7 @@
 * Login to Nextcloud and save session for faster next login.
 * Interactive SFTP-like prompt (`nftp:<current_path>`).
 * Navigate Nextcloud directories (`cd`, `pwd`, `ls`).
-* Upload (`put`) and download (`get`) single files.
+* Upload (`put`) and download (`get`) multiple files.
 * Create and delete folders (`mkdir`, `rmdir`).
 * Delete files or folders (`rm`) with confirmation.
 * Local commands: `lls`, `lpwd`, `lcd`.
@@ -20,19 +20,33 @@
 
 ---
 
-## Installation
+## Installation python method
 
 1. Clone the repository:
 
 ```bash
 git clone https://github.com/Keyz078/nftp.git
 cd nftp
+pip3 install -r requirements.txt
+python3 nftp.py
 ```
 
-2. Make the script executable:
+## Binary method
+
+1. Download binary
+```bash
+# for amd64
+wget https://github.com/Keyz078/nftp/releases/download/v0.1.0/nftp-amd64.tar.gz
+
+# for arm64
+https://github.com/Keyz078/nftp/releases/download/v0.1.0/nftp-arm64.tar.gz
+```
+2. Extract and make the script executable:
 
 ```bash
-chmod +x nftp
+tar xzvf nftp-{arch}.tar.gz
+chmod +x nftp-{arch}
+sudo mv nft-{arch} /usr/local/bin/nftp
 ```
 
 3. Run:
@@ -40,8 +54,6 @@ chmod +x nftp
 ```bash
 ./nftp
 ```
-
-> Requires Bash shell environment.
 
 ---
 
@@ -62,8 +74,8 @@ nftp:/>
 | `ls`               | List files and folders in current remote path |
 | `pwd`              | Show current remote path                      |
 | `cd <dir>`         | Change remote directory                       |
-| `get <file>`       | Download remote file to local machine         |
-| `put <local_file>` | Upload local file to current remote directory |
+| `get <file1> <file2>`       | Download multiple remote file to local machine         |
+| `put <local_file>` | Upload multiple local file to current remote directory |
 | `mkdir <folder>`   | Create remote folder                          |
 | `rm <file/folder>` | Delete remote file/folder (confirmation)      |
 | `rmdir <folder>`   | Delete empty remote folder (confirmation)     |
@@ -109,7 +121,6 @@ nftp:/Documents/NewFolder> put ~/Downloads/file.txt
 
 ## Notes
 
-* Only **one file at a time** can be uploaded or downloaded.
 * Directories are suffixed with `/` when listed (`Reports/`).
 * Session is saved in `~/.nextcloud_session` for faster login next time.
 * Supports spaces in filenames and paths.
@@ -119,4 +130,4 @@ nftp:/Documents/NewFolder> put ~/Downloads/file.txt
 
 ## License
 
-MIT License
+[MIT License](./LICENSE)
