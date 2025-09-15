@@ -50,4 +50,4 @@ jobs:
         with:
           files: dist/nftp-${{ matrix.arch }}.tar.gz
         env:
-          GH_PAT: ${{ secrets.GH_PAT }}
+          GITHUB_TOKEN: ${{ secrets.GH_PAT }}
