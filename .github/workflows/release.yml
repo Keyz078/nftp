@@ -45,7 +45,7 @@ jobs:
               cd dist && tar -czf nftp-${{ matrix.arch }}.tar.gz nftp-${{ matrix.arch }} README.md
             "
 
-      - name: Upload release asset (.zip) for ${{ matrix.arch }}
+      - name: Upload release asset (.tar.gz) for ${{ matrix.arch }}
         uses: softprops/action-gh-release@v2
         with:
           files: dist/nftp-${{ matrix.arch }}.tar.gz
