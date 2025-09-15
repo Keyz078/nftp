@@ -327,13 +327,13 @@ def cd_command(args):
 def get_command(args):
     for file in args:
         file_path = expand_nc_path(file)
-        propfind_response = nextcloud_request("PROPFIND", file_path)
-        if not propfind_response:
+        response = nextcloud_request("PROPFIND", file_path)
+        if not response:
             print(f"Error: '{file}' not found.")
             continue
 
         try:
-            root = ET.fromstring(propfind_response.text)
+            root = ET.fromstring(response.text)
             hrefs = [resp.find("d:href", NS).text for resp in root.findall("d:response", NS)]
             if any(h.endswith("/") for h in hrefs):
                 print(f"Error: '{file}' is a directory.")
@@ -393,8 +393,8 @@ def mkdir_command(args):
 def rm_command(args):
     for target in args:
         path = expand_nc_path(target)
-        propfind_response = nextcloud_request("PROPFIND", path)
-        if not propfind_response:
+        response = nextcloud_request("PROPFIND", path)
+        if not response:
             print(f"Error: '{target}' not found.")
             continue
 
@@ -409,13 +409,20 @@ def rm_command(args):
 def rmdir_command(args):
     for target in args:
         path = expand_nc_path(target)
-        propfind_response = nextcloud_request("PROPFIND", f"{path}/")
-        if not propfind_response or propfind_response.status_code not in [200, 207]:
+        response = nextcloud_request("PROPFIND", f"{path}/")
+        if not response or response.status_code not in [200, 207]:
             print(f"Error: '{target}' not found or is not a directory.")
             continue
 
+        items = re.findall(r"<d:href>(.*?)</d:href>", response.text)
+        if len(items) == 1:
+            href = items[0]
+            if not href.endswith("/"):
+                print(f"rmdir: {target}: Not a directory")
+                return
+
         try:
-            root = ET.fromstring(propfind_response.text)
+            root = ET.fromstring(response.text)
             items = root.findall("d:response", NS)
             if len(items) > 1:
                 print(f"Error: '{target}' is not empty.")
