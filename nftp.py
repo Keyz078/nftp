@@ -16,7 +16,7 @@ from urllib.parse import quote, urlparse
 import posixpath
 import subprocess
 
-VERSION="DEV"
+VERSION = "dev"
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -42,10 +42,11 @@ Available Commands:
   get   <file1> <file2> ...                         - Download file to local machine
   put   <local_file1> <local_file2>...              - Upload local file to current Nextcloud directory
   mkdir <directory>                                 - Create a directory
-  rm    <target1> <target2> ...                     - Delete file/directory (confirmation)
+  rm    <target1> <target2> ... [-f]                - Delete file/directory (confirmation)
   rmdir <dir1> <dir2>...                            - Delete empty directory (confirmation)
-  cp    <src1> <src2> ... <target>  [-i]            - Copy files on server (interactive)
-  mv    <src1> <src2> ... <target>  [-i]            - Move files on server (interactive)
+  cp    <src1> <src2> ... <target>  [-i] [-r]       - Copy items on server (interactive)
+  mv    <src1> <src2> ... <target>  [-i]            - Move items on server (interactive)
+  logout                                            - Logout from the server (clear session)
   clear                                             - Clean the screen
   help                                              - Show this help
   exit                                              - Exit CLI
@@ -63,12 +64,15 @@ def expand_nc_path(path):
         return "/"
     elif path.startswith("~/"):
         return posixpath.join("/", path[2:])
+    elif path.startswith("~"):
+        return posixpath.join("/", path[1:])
     elif path.startswith("/"):
         return posixpath.normpath(path)
     elif path == ".":
         return CURRENT_PATH
     else:
         return posixpath.normpath(posixpath.join(CURRENT_PATH, path))
+
 
 def ask_yes_no(prompt):
     while True:
@@ -113,14 +117,13 @@ def file_stream(source, total=0, mode="read", desc=""):
                 yield chunk
 
 # ----------------- WEBDAV REQUEST -----------------
-def nextcloud_request(method, path, data=None, destination=None, suppress_404=False):
+def nextcloud_request(method, path, data=None, destination=None, suppress=None):
     headers = {"Authorization": f"Basic {CREDS}"}
     if destination:
         headers["Destination"] = f"{BASE_URL}{encode_path(destination)}"
         headers["Overwrite"] = "T"
     encoded_path = encode_path(path)
     url = f"{BASE_URL}{encoded_path}"
-    # print(f"{method} {url}")
     try:
         response = requests.request(
             method,
@@ -134,7 +137,7 @@ def nextcloud_request(method, path, data=None, destination=None, suppress_404=Fa
         response.raise_for_status()
         return response
     except requests.exceptions.HTTPError as e:
-        if not (suppress_404 and e.response.status_code == 404):
+        if not (suppress and e.response.status_code in (suppress if isinstance(suppress, (list, set, tuple)) else [suppress])):
             print(f"HTTP Error: {e.response.status_code} - {e.response.reason}")
         return e.response
     except requests.exceptions.SSLError:
@@ -143,6 +146,50 @@ def nextcloud_request(method, path, data=None, destination=None, suppress_404=Fa
     except requests.exceptions.RequestException as e:
         print(f"Network error: {e}")
         return None
+
+# ----------------- PROPFIND & PARSING UTILITIES -----------------
+def propfind_path(path, suppress=None):
+    response = nextcloud_request("PROPFIND", path, suppress=suppress)
+    if not response or response.status_code not in [200, 207]:
+        return None
+    try:
+        root = ET.fromstring(response.text)
+        return root
+    except ET.ParseError:
+        print(f"Failed to parse server response for '{path}'")
+        return None
+
+def is_directory(path):
+    root = propfind_path(f"{path.rstrip('/')}/", suppress=404)
+    if root is None:
+        return False
+    hrefs = [elem.text for elem in root.findall("d:response/d:href", NS)]
+    # If only one href and it does not end with '/', it's a file
+    if len(hrefs) == 1 and not hrefs[0].endswith("/"):
+        return False
+    return True
+
+def get_item_info(resp):
+    href = resp.find("d:href", NS).text
+    name = os.path.basename(href.rstrip("/"))
+    name = requests.utils.unquote(name)
+    is_dir = href.endswith("/")
+    size_elem = resp.find(".//d:getcontentlength", NS)
+    size = int(size_elem.text) if size_elem is not None and size_elem.text else 0
+    lastmod = None
+    lastmod_elem = resp.find(".//d:getlastmodified", NS)
+    if lastmod_elem is not None and lastmod_elem.text:
+        try:
+            dt = parsedate_to_datetime(lastmod_elem.text)
+            lastmod = dt.astimezone().strftime("%Y-%m-%d %H:%M")
+        except Exception:
+            lastmod = lastmod_elem.text
+    return {
+        "name": name,
+        "is_dir": is_dir,
+        "size": size,
+        "lastmod": lastmod
+    }
 
 # ----------------- LOGIN -----------------
 def validate_url(url):
@@ -180,7 +227,6 @@ def login():
             print("Connection failed: Could not reach server or invalid URL.")
             sys.exit(1)
         elif response.status_code in [200, 207]:
-            print("Login successful!")
             if not os.path.exists(SESSION_FILE) and ask_yes_no("Save session for next time?"):
                 save_session()
                 print(f"Session saved to {SESSION_FILE}")
@@ -198,6 +244,15 @@ def login():
     except (EOFError, KeyboardInterrupt):
         print("\nLogin cancelled.")
         sys.exit(1)
+
+# ----------------- Logout -----------------
+def logout():
+    if os.path.exists(SESSION_FILE):
+        os.remove(SESSION_FILE)
+        print("Session cleared.")
+        sys.exit("Logged out")
+    else:
+        print("No session to clear.")
 
 # ----------------- LOCAL COMMANDS -----------------
 def local_ls(args):
@@ -227,7 +282,7 @@ def ls_command(args):
     paths = []
 
     for a in args:
-        if a.startswith("-"):
+        if a.startswith("-") and len(a) > 1:
             for ch in a[1:]:
                 if ch == "l":
                     long_format = True
@@ -266,15 +321,9 @@ def ls_command(args):
     def list_path(target):
         target = target.rstrip("/") if target != "/" else "/"
 
-        response = nextcloud_request("PROPFIND", target, suppress_404=True)
-        if not response or response.status_code not in [200, 207]:
+        root = propfind_path(target, suppress=404)
+        if root is None:
             print(f"ls: cannot access '{target}': No such file or directory")
-            return
-
-        try:
-            root = ET.fromstring(response.text)
-        except ET.ParseError:
-            print(f"ls: Failed to parse server response for '{target}'")
             return
 
         responses = root.findall("d:response", NS)
@@ -287,58 +336,17 @@ def ls_command(args):
         is_dir = href.endswith("/")
 
         if not is_dir:
-            name = os.path.basename(href.rstrip("/"))
-            name = requests.utils.unquote(name)
-
-            size_elem = target_resp.find(".//d:getcontentlength", NS)
-            size = int(size_elem.text) if size_elem is not None and size_elem.text else 0
-
-            lastmod = None
-            lastmod_elem = target_resp.find(".//d:getlastmodified", NS)
-            if lastmod_elem is not None and lastmod_elem.text:
-                try:
-                    dt = parsedate_to_datetime(lastmod_elem.text)
-                    lastmod = dt.astimezone().strftime("%Y-%m-%d %H:%M")
-                except Exception:
-                    lastmod = lastmod_elem.text
-
-            item = {
-                "name": name,
-                "is_dir": False,
-                "size": size,
-                "lastmod": lastmod
-            }
+            item = get_item_info(target_resp)
             print_item(item)
             return
 
         items = []
         for resp in responses[1:]:
-            href = resp.find("d:href", NS).text
-            name = os.path.basename(href.rstrip("/"))
-            name = requests.utils.unquote(name)
-
-            if not name or name == USERNAME or name == os.path.basename(target):
+            item = get_item_info(resp)
+            # Skip current user folder or folder itself
+            if not item["name"] or item["name"] == USERNAME or item["name"] == os.path.basename(target):
                 continue
-
-            is_dir = href.endswith("/")
-            size_elem = resp.find(".//d:getcontentlength", NS)
-            size = int(size_elem.text) if size_elem is not None and size_elem.text else 0
-
-            lastmod = None
-            lastmod_elem = resp.find(".//d:getlastmodified", NS)
-            if lastmod_elem is not None and lastmod_elem.text:
-                try:
-                    dt = parsedate_to_datetime(lastmod_elem.text)
-                    lastmod = dt.astimezone().strftime("%Y-%m-%d %H:%M")
-                except Exception:
-                    lastmod = lastmod_elem.text
-
-            items.append({
-                "name": name,
-                "is_dir": is_dir,
-                "size": size,
-                "lastmod": lastmod
-            })
+            items.append(item)
 
         if not items:
             print("Directory is empty.")
@@ -347,7 +355,6 @@ def ls_command(args):
         items.sort(key=lambda x: (not x["is_dir"], x["name"].lower()))
 
         if long_format:
-            max_size_width = max(len(fmt_size(item["size"])) for item in items)
             for item in items:
                 print_item(item)
         else:
@@ -372,52 +379,48 @@ def ls_command(args):
 # ----------------- CP/MV COMMAND -----------------
 def handle_copy_move(args, operation="COPY"):
     interactive = False
+    recursive = False
     non_flag_args = []
-
+    usage_message=f"Usage: {'cp' if operation == 'COPY' else 'mv'} {'[-r] [-i]' if operation == 'COPY' else '[-i]'} <source1> <source2> ... <target>"
     for a in args:
         if a.startswith("-") and len(a) > 1:
             for ch in a[1:]:
                 if ch == "i":
                     interactive = True
+                elif ch == "r" and operation == "COPY":
+                    recursive = True
                 else:
                     print(f"Unknown flag: -{ch}")
+                    print(usage_message)
                     return
         else:
             non_flag_args.append(a)
 
     if len(non_flag_args) < 2:
-        print(f"Usage: {operation.lower()} [-i] <source1> <source2> ... <target>")
+        print(usage_message)
         return
 
     target = expand_nc_path(non_flag_args[-1])
     sources = non_flag_args[:-1]
 
-    response = nextcloud_request("PROPFIND", target.rstrip("/") + "/", suppress_404=True)
-    target_is_dir = False
-    if response and response.status_code in [200, 207]:
-        root = ET.fromstring(response.text)
-        items = [elem.text for elem in root.findall("d:response/d:href", NS)]
-        target_is_dir = len(items) != 1 or items[0].endswith("/")
+    target_is_dir = is_directory(target)
 
     if len(sources) > 1 and not target_is_dir:
-        print(f"{operation.lower()}: target '{target}' is not a directory")
+        print(f"{'cp' if operation == 'COPY' else 'mv'}: target '{target}' is not a directory")
         return
 
     for src in sources:
         src_path = expand_nc_path(src)
-        response = nextcloud_request("PROPFIND", src_path, suppress_404=True)
-        if not response:
-            print(f"{operation.lower()}: cp '{src}' no such file or directory.")
+        root = propfind_path(src_path, suppress=404)
+        if root is None:
+            print(f"{'cp' if operation == 'COPY' else 'mv'}: '{src}' no such file or directory.")
             continue
 
-        try:
-            root = ET.fromstring(response.text)
-            hrefs = [resp.find("d:href", NS).text for resp in root.findall("d:response", NS)]
-            if any(h.endswith("/") for h in hrefs):
-                print(f"Error: '{src}' is a directory. Operation not supported.")
-                continue
-        except ET.ParseError:
-            print("Failed to parse server response.")
+        hrefs = [resp.find("d:href", NS).text for resp in root.findall("d:response", NS)]
+        is_dir = any(h.endswith("/") for h in hrefs)
+
+        if operation == "COPY" and is_dir and not recursive:
+            print(f"cp: {src_path} is a directory, use -r to copy recursively")
             continue
 
         dst_path = posixpath.normpath(
@@ -429,17 +432,17 @@ def handle_copy_move(args, operation="COPY"):
             continue
 
         if interactive:
-            check_exists_response = nextcloud_request("PROPFIND", dst_path, suppress_404=True)
-            if check_exists_response and check_exists_response.status_code in [200, 207]:
+            check_exists_root = propfind_path(dst_path, suppress=404)
+            if check_exists_root is not None:
                 if not ask_yes_no(f"Overwrite '{dst_path}'?"):
                     print("Skipped.")
                     continue
 
         resp = nextcloud_request(operation, src_path, destination=dst_path)
         if resp:
-            print(f"{operation.capitalize()}d '{src}' to '{dst_path}'. (status {resp.status_code})")
+            print(f"{'Copied' if operation == 'COPY' else 'Moved'} '{src}' to '{dst_path}'. (status {resp.status_code})")
         else:
-            print(f"Error: Failed to {operation.lower()} '{src}' to '{dst_path}'.")
+            print(f"Error: Failed to {'cp' if operation == 'COPY' else 'mv'} '{src}' to '{dst_path}'.")
 
 cp_command = lambda args: handle_copy_move(args, operation="COPY")
 mv_command = lambda args: handle_copy_move(args, operation="MOVE")
@@ -448,19 +451,14 @@ mv_command = lambda args: handle_copy_move(args, operation="MOVE")
 def get_command(args):
     for file in args:
         file_path = expand_nc_path(file)
-        response = nextcloud_request("PROPFIND", file_path)
-        if not response:
+        root = propfind_path(file_path)
+        if root is None:
             print(f"Error: '{file}' not found.")
             continue
 
-        try:
-            root = ET.fromstring(response.text)
-            hrefs = [resp.find("d:href", NS).text for resp in root.findall("d:response", NS)]
-            if any(h.endswith("/") for h in hrefs):
-                print(f"Error: '{file}' is a directory.")
-                continue
-        except ET.ParseError:
-            print("Failed to parse server response.")
+        hrefs = [resp.find("d:href", NS).text for resp in root.findall("d:response", NS)]
+        if any(h.endswith("/") for h in hrefs):
+            print(f"Error: '{file}' is a directory.")
             continue
 
         get_response = nextcloud_request("GET", file_path)
@@ -482,16 +480,34 @@ def get_command(args):
 
 # ----------------- PUT COMMAND -----------------
 def put_command(args):
-    for local_file in args:
+    if not args:
+        print("Usage: put <local_file1> <local_file2> ... [target_directory]")
+        return
+
+    possible_target = expand_nc_path(args[-1])
+    target_is_dir = is_directory(possible_target)
+
+    if target_is_dir:
+        local_files = args[:-1]
+        target_dir = possible_target
+    else:
+        local_files = args
+        target_dir = CURRENT_PATH
+
+    if not local_files:
+        print("No local files specified to upload.")
+        return
+
+    for local_file in local_files:
         if not os.path.isfile(local_file):
             print(f"Error: '{local_file}' is not a regular file or does not exist.")
             continue
 
         filename = os.path.basename(local_file)
-        upload_path = expand_nc_path(filename)
+        upload_path = posixpath.join(target_dir.rstrip('/'), filename)
         total = os.path.getsize(local_file)
 
-        print(f"Uploading '{local_file}' to '{CURRENT_PATH}' on server...")
+        print(f"Uploading '{local_file}' to '{target_dir}' on server...")
 
         put_response = nextcloud_request(
             "PUT",
@@ -506,11 +522,48 @@ def put_command(args):
 
 # ----------------- MKDIR COMMAND -----------------
 def mkdir_command(args):
-    for folder in args:
+    parents = False
+    folders = []
+
+    for a in args:
+        if a.startswith("-") and len(a) > 1:
+            for ch in a[1:]:
+                if ch == "p":
+                    parents = True
+                else:
+                    print(f"Unknown flag: -{ch}")
+                    print("Usage: mkdir [-p] <directory1> <directory2> ...")
+                    return
+        else:
+            folders.append(a)
+
+    if not folders:
+        print("Usage: mkdir [-p] <directory1> <directory2> ...")
+        return
+
+    for folder in folders:
         path = expand_nc_path(folder)
-        response = nextcloud_request("MKCOL", path)
-        if response:
-            print(f"Folder '{folder}' created.")
+        if parents:
+            parts = path.strip("/").split("/")
+            current = ""
+            for part in parts:
+                current = f"{current}/{part}" if current else f"/{part}"
+                resp = nextcloud_request("MKCOL", current, suppress=405)
+                if resp or resp.status_code in (201, 405):
+                    pass
+                else:
+                    print(f"Failed to create '{current}' (status {resp.status_code if resp else 'no response'})")
+                    break
+            else:
+                print(f"Folder '{folder}' created (with parents).")
+        else:
+            resp = nextcloud_request("MKCOL", path, suppress=405)
+            if resp and resp.status_code == 201:
+                print(f"Folder '{folder}' created.")
+            elif resp and resp.status_code == 405:
+                print(f"Folder '{folder}' already exists.")
+            else:
+                print(f"Failed to create '{folder}' (status {resp.status_code if resp else 'no response'})")
 
 # ----------------- RM/RMDIR COMMAND -----------------
 def rm_command(args):
@@ -530,8 +583,8 @@ def rm_command(args):
 
     for target in targets:
         path = expand_nc_path(target)
-        response = nextcloud_request("PROPFIND", path)
-        if not response:
+        root = propfind_path(path, suppress=404)
+        if root is None:
             print(f"rm: '{target}' no such file or directory.")
             continue
 
@@ -544,31 +597,11 @@ def rm_command(args):
             print(f"'{target}' deleted.")
 
 def rmdir_command(args):
-    force = False
-    targets = []
-
-    for a in args:
-        if a.startswith("-") and len(a) > 1:
-            for ch in a[1:]:
-                if ch == "f":
-                    force = True
-                else:
-                    print(f"rmdir: Unknown flag: -{ch}")
-                    return
-        else:
-            targets.append(a)
-
     for target in args:
         path = expand_nc_path(target)
-        response = nextcloud_request("PROPFIND", f"{path}/")
-        if not response or response.status_code not in [200, 207]:
+        root = propfind_path(f"{path}/", suppress=404)
+        if root is None:
             print(f"rmdir: '{target}' no such file or directory.")
-            continue
-
-        try:
-            root = ET.fromstring(response.text)
-        except ET.ParseError:
-            print("Failed to parse server response.")
             continue
 
         hrefs = [elem.text for elem in root.findall(".//d:href", NS)]
@@ -579,11 +612,7 @@ def rmdir_command(args):
 
         responses = root.findall("d:response", NS)
         if len(responses) > 1:
-            print(f"Error: '{target}' is not empty.")
-            continue
-
-        if not force and not ask_yes_no(f"Are you sure to delete folder '{target}'?"):
-            print("Cancelled.")
+            print(f"rmdir: '{target}' is not empty.")
             continue
 
         response = nextcloud_request("DELETE", path)
@@ -596,22 +625,9 @@ def cd_command(args):
 
     target = expand_nc_path(args[0]) if args else "/"
     target = posixpath.normpath(target)
-
-    response = nextcloud_request("PROPFIND", f"{target}/", suppress_404=True)
-
-    if not response or response.status_code not in [200, 207]:
-        print(f"cd: {target}: No such file or directory")
-        return
-
-    try:
-        root = ET.fromstring(response.text)
-        items = [elem.text for elem in root.findall("d:response/d:href", NS)]
-
-        if len(items) == 1 and not items[0].endswith("/"):
-            print(f"cd: {target}: Not a directory")
-            return
-    except ET.ParseError:
-        print(f"cd: Failed to parse server response for {target}")
+    
+    if not is_directory(target):
+        print(f"cd: {target}: No such file or directory or not a directory")
         return
 
     CURRENT_PATH = target.rstrip("/") if target != "/" else "/"
@@ -633,6 +649,7 @@ def main():
 
     login()
     commands = {
+        "logout": lambda args: logout(),
         "ls": ls_command,
         "pwd": lambda args: print(CURRENT_PATH),
         "cd": cd_command,
