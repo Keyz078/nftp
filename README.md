@@ -11,9 +11,10 @@
 * Login to Nextcloud and save session for faster next login.
 * Interactive SFTP-like prompt (`nftp:<current_path>`).
 * Navigate Nextcloud directories (`cd`, `pwd`, `ls`).
-* Upload (`put`) and download (`get`) multiple files.
-* Create and delete folders (`mkdir`, `rmdir`).
-* Delete files or folders (`rm`) with confirmation.
+* Upload (`put`) and download (`get`) multiple files (Recursive not supported).
+* Create and delete directories (`mkdir`, `rmdir`).
+* Copy and move items (`cp`, `mv`).
+* Delete files or directories (`rm`, `rmdir`) with confirmation.
 * Local commands: `lls`, `lpwd`, `lcd`.
 * Built-in help menu (`help`) for all commands.
 * Supports filenames and paths with spaces.
@@ -37,10 +38,10 @@ python3 nftp.py
 1. Download binary
 ```bash
 # for amd64
-wget https://github.com/Keyz078/nftp/releases/download/v0.1.0/nftp-amd64.tar.gz
+wget https://github.com/Keyz078/nftp/releases/download/v0.1.1/nftp-amd64.tar.gz
 
 # for arm64
-wget https://github.com/Keyz078/nftp/releases/download/v0.1.0/nftp-arm64.tar.gz
+wget https://github.com/Keyz078/nftp/releases/download/v0.1.1/nftp-arm64.tar.gz
 ```
 2. Extract and make the script executable:
 
@@ -70,24 +71,27 @@ nftp:/>
 
 ### Remote Commands
 
-| Command            | Description                                   |
-| ------------------ | --------------------------------------------- |
-| `ls`               | List files and folders in current remote path |
-| `pwd`              | Show current remote path                      |
-| `cd <dir>`         | Change remote directory                       |
-| `get <file1> <file2>`       | Download multiple remote file to local machine         |
-| `put <local_file>` | Upload multiple local file to current remote directory |
-| `mkdir <folder>`   | Create remote folder                          |
-| `rm <file/folder>` | Delete remote file/folder (confirmation)      |
-| `rmdir <folder>`   | Delete empty remote folder (confirmation)     |
-| `help`             | Show help menu                                |
-| `exit`             | Exit CLI                                      |
+| Command                                        | Description                                                     |
+|------------------------------------------------|-----------------------------------------------------------------|
+| `ls [-l] [-h] [-lh]`                           | List files and directories in current remote path               |
+| `pwd`                                          | Show current remote path                                        |
+| `cd <dir>`                                     | Change remote directory                                         |
+| `get <file1> <file2> ...`                      | Download multiple remote file to local                          |
+| `put <local_file1> <local_file2> ... <target>` | Upload multiple local files (last args can be directory target) |
+| `cp <src> <src> ... <target> [-i] [-r]`        | Copy items on server                                            |
+| `mv <src> <src> ... <target> [-i]`             | Move items on server                                            |
+| `mkdir <directories>`                          | Create remote directories                                       |
+| `rm <file/directories>` [-f]                   | Delete remote file/directories recursively (confirmation)       |
+| `rmdir <directories>`                          | Delete empty remote directories (confirmation)                  |
+| `help`                                         | Show help menu                                                  |
+| `exit`                                         | Exit CLI                                                        |
+| `logout`                                       | Logout from the server (clear session)                          |
 
 ### Local Commands
 
 | Command     | Description                               |
 | ----------- | ----------------------------------------- |
-| `lls`       | List files and folders in local directory |
+| `lls`       | List files and directories in local directory |
 | `lpwd`      | Show current local directory              |
 | `lcd <dir>` | Change local directory                    |
 
